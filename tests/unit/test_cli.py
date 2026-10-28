@@ -967,8 +967,13 @@ def test_a_permission_denied_npu_in_prepare_exits_ten(
     assert result.exit_code == int(ExitCode.ENVIRONMENT_UNUSABLE)
     assert "No permission to use the NPU device node" in result.stderr
     # Only the hint that repeats the user's own command with --debug may say it.
-    advice = [line for line in result.stderr.splitlines() if "--debug" not in line]
-    assert not any("--device auto" in line for line in advice)
+    # The console wraps that hint wherever its paths make it long, so compare
+    # with whitespace removed.
+    rerun = f"{_root(home)} --debug prepare {SAFETENSORS_REPO} --device {device} --yes"
+    hint = "".join(f"Re-run with --debug to see the raw error: {rerun}".split())
+    stderr = "".join(plain_text(result.stderr).split())
+    assert stderr.count(hint) == 1
+    assert "--deviceauto" not in stderr.replace(hint, "")
     assert {device for _name, device in runtime.compiled} == {"NPU"}
 
 
