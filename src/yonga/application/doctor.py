@@ -34,11 +34,19 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from yonga.adapters import DriverProbe
 from yonga.adapters.filesystem import format_bytes
 from yonga.adapters.openvino_probe import (
     compiler_in_plugin,
     npu_compiler_version,
     npu_driver_version,
+)
+from yonga.application.drivers import (
+    SYSTEM_CHANGES_NOTE,
+    DriverComponent,
+    claimed_device_steps,
+    install_steps,
+    is_legacy_gpu,
 )
 from yonga.application.progress import ProgressEvent, ProgressKind, ProgressSink, null_sink
 from yonga.application.self_install import CommandRelation, InstallationStatus, InstallKind
@@ -56,11 +64,15 @@ from yonga.domain.diagnostics import (
 )
 from yonga.domain.environments import ESTIMATED_ENVIRONMENT_BYTES, ExportEnvironment
 from yonga.domain.hardware import (
+    DeviceKind,
+    DriverLibraries,
     FilesystemInfo,
     HardwareInventory,
+    HostInfo,
     HuggingFaceAuthInfo,
     NPUNodeInfo,
     OpenVINODevice,
+    PciAccelerator,
     normalise_device,
 )
 from yonga.util.redaction import redact_text
@@ -171,7 +183,7 @@ def group_membership_remediation(group_name: str) -> list[str]:
         f"add your user to the '{group_name}' group, then log out and back in "
         "for the new membership to take effect",
         f"Suggested command, to run yourself: sudo usermod -aG {group_name} $USER",
-        "yonga never runs sudo and never changes permissions or group membership.",
+        SYSTEM_CHANGES_NOTE,
     ]
 
 
@@ -342,9 +354,11 @@ class DoctorService:
         if auth is not None and inventory.hf_auth is None:
             inventory = inventory.model_copy(update={"hf_auth": auth})
 
+        inventory = self._with_drivers(inventory, notes)
         runtime_names, runtime_error = self._runtime_devices(notes)
+        device_names = _merge_device_names(runtime_names, inventory)
         devices_section, runtime_usable = self._devices_section(
-            inventory, runtime_names, runtime_error
+            inventory, device_names, runtime_names, runtime_error
         )
         installation = self._installation_status()
         environments = self._list_export_environments()
@@ -366,6 +380,11 @@ class DoctorService:
                 )
             ),
             self._emit(devices_section),
+        ]
+        drivers = self._drivers_section(inventory, runtime_names)
+        if drivers is not None:
+            sections.append(self._emit(drivers))
+        sections += [
             self._emit(self._npu_section(inventory)),
             self._emit(self._storage_section(inventory, environments, base_bytes, full=full)),
             self._emit(self._huggingface_section(inventory, auth)),
@@ -393,6 +412,24 @@ class DoctorService:
         except Exception as exc:  # pragma: no cover - a probe that raises is a bug
             notes.append(f"The hardware probe failed: {_describe(exc)}")
             return HardwareInventory()
+
+    def _with_drivers(self, inventory: HardwareInventory, notes: list[str]) -> HardwareInventory:
+        """Add the PCI accelerators and driver libraries, when the probe can list them.
+
+        Only doctor needs them, so they are asked for here rather than in
+        :meth:`HardwareProbe.inventory`, which every ``prepare`` runs.
+        """
+        if not isinstance(self._hardware, DriverProbe):
+            return inventory
+        try:
+            accelerators = self._hardware.pci_accelerators(notes)
+            libraries = self._hardware.driver_libraries()
+        except Exception as exc:  # pragma: no cover - a probe that raises is a bug
+            notes.append(f"The driver probe failed: {_describe(exc)}")
+            return inventory
+        return inventory.model_copy(
+            update={"accelerators": accelerators, "driver_libraries": libraries}
+        )
 
     def _auth_info(
         self, inventory: HardwareInventory, notes: list[str]
@@ -693,12 +730,12 @@ class DoctorService:
     def _devices_section(
         self,
         inventory: HardwareInventory,
+        names: Sequence[str],
         runtime_names: Sequence[str],
         runtime_error: str | None,
     ) -> tuple[HealthSection, bool]:
         """One check per OpenVINO device, or one error explaining their absence."""
         importable = inventory.openvino_available or bool(runtime_names)
-        names = _merge_device_names(runtime_names, inventory)
         checks: list[HealthCheck] = []
 
         if not importable:
@@ -755,6 +792,48 @@ class DoctorService:
         checks.extend(_device_check(name, inventory.device(name)) for name in names)
         return HealthSection(id="devices", title="Devices", checks=_finalise(checks)), True
 
+    # --- drivers --------------------------------------------------------
+
+    def _drivers_section(
+        self, inventory: HardwareInventory, runtime_names: Sequence[str]
+    ) -> HealthSection | None:
+        """The Intel GPUs and NPUs on the PCI bus and the system drivers each one needs.
+
+        Omitted when the bus was not read (another platform, or a probe that
+        does not list it): the Devices section still says what OpenVINO sees.
+        """
+        accelerators = inventory.accelerators
+        if accelerators is None:
+            return None
+        if not accelerators:
+            return HealthSection(
+                id="drivers",
+                title="Drivers",
+                checks=[
+                    _check(
+                        "drivers.none",
+                        "Intel GPU/NPU",
+                        Severity.INFO,
+                        value="none found",
+                        detail="No Intel GPU or NPU is on the PCI bus; OpenVINO runs on the CPU.",
+                    )
+                ],
+            )
+        libraries = inventory.driver_libraries or DriverLibraries()
+        # The raw names: OpenVINO calls two GPUs GPU.0 and GPU.1, which the
+        # normalised list the Devices section shows folds into one GPU.
+        raw_names = list(runtime_names) or [device.name for device in inventory.devices]
+        checks: list[HealthCheck] = []
+        for kind in (DeviceKind.GPU, DeviceKind.NPU):
+            found = [item for item in accelerators if item.kind is kind]
+            for index, accelerator in enumerate(found):
+                prefix = kind.value.lower() + (str(index) if len(found) > 1 else "")
+                visible = _openvino_lists(kind, raw_names, index, len(found))
+                checks.extend(
+                    _accelerator_checks(prefix, accelerator, libraries, inventory, visible=visible)
+                )
+        return HealthSection(id="drivers", title="Drivers", checks=_finalise(checks))
+
     # --- npu ------------------------------------------------------------
 
     def _npu_section(self, inventory: HardwareInventory) -> HealthSection:
@@ -782,7 +861,7 @@ class DoctorService:
         group_check = _npu_group_check(node)
         if group_check is not None:
             checks.append(group_check)
-        checks.extend(_npu_compiler_checks(node, properties))
+        checks.extend(_npu_compiler_checks(node, properties, inventory.host))
         return HealthSection(id="npu", title="NPU", checks=_finalise(checks))
 
     # --- storage ---------------------------------------------------------
@@ -1416,6 +1495,173 @@ def _device_check(name: str, device: OpenVINODevice | None) -> HealthCheck:
     return _check(check_id, name, Severity.OK, value=full_name, detail=architecture)
 
 
+#: Kernel modules that drive each accelerator kind.
+_KERNEL_DRIVERS: dict[DeviceKind, tuple[str, ...]] = {
+    DeviceKind.GPU: ("i915", "xe"),
+    DeviceKind.NPU: ("intel_vpu",),
+}
+
+
+def _openvino_lists(kind: DeviceKind, names: Sequence[str], index: int, count: int) -> bool:
+    """Whether OpenVINO lists the ``index``-th of ``count`` accelerators of ``kind``.
+
+    ``names`` are OpenVINO's own, un-normalised: one GPU is ``GPU``, several are
+    ``GPU.0``, ``GPU.1``. Only the number listed is compared, since OpenVINO's
+    numbering need not follow PCI order.
+    """
+    listed = {name for name in names if name.split(".")[0].upper() == kind.value}
+    return len(listed) > index if count > 1 else bool(listed)
+
+
+def _accelerator_checks(
+    prefix: str,
+    accelerator: PciAccelerator,
+    libraries: DriverLibraries,
+    inventory: HardwareInventory,
+    *,
+    visible: bool,
+) -> list[HealthCheck]:
+    """Kernel driver, user-space driver and OpenVINO visibility of one accelerator."""
+    kind = accelerator.kind
+    label = kind.value if prefix == kind.value.lower() else f"{kind.value} {accelerator.address}"
+    pci_id = f"{accelerator.vendor_id[2:]}:{accelerator.device_id[2:]}"
+    host = inventory.host
+    checks: list[HealthCheck] = []
+
+    kernel_ok = accelerator.kernel_driver in _KERNEL_DRIVERS[kind]
+    if kernel_ok:
+        checks.append(
+            _check(
+                f"drivers.{prefix}.kernel",
+                f"{label} kernel",
+                Severity.OK,
+                value=accelerator.kernel_driver,
+                detail=f"PCI {pci_id} at {accelerator.address}",
+            )
+        )
+    else:
+        bound = accelerator.kernel_driver
+        component = (
+            DriverComponent.GPU_KERNEL if kind is DeviceKind.GPU else DriverComponent.NPU_KERNEL
+        )
+        checks.append(
+            _check(
+                f"drivers.{prefix}.kernel",
+                f"{label} kernel",
+                Severity.WARNING,
+                value=bound or "no driver",
+                detail=(
+                    f"PCI {pci_id} at {accelerator.address} is driven by '{bound}', which "
+                    "OpenVINO cannot use"
+                    if bound
+                    else f"PCI {pci_id} at {accelerator.address} has no kernel driver bound"
+                ),
+                remediation=(
+                    claimed_device_steps(kind.value, accelerator.address, bound)
+                    if bound
+                    else install_steps(component, host)
+                ),
+            )
+        )
+
+    legacy = kind is DeviceKind.GPU and not visible and is_legacy_gpu(accelerator.device_id)
+    if legacy:
+        # Gen11 and older: the current compute-runtime does not cover them, so
+        # no package doctor could name would make OpenVINO list this GPU.
+        checks.append(
+            _check(
+                f"drivers.{prefix}.runtime",
+                f"{label} runtime",
+                Severity.INFO,
+                value="older generation",
+                detail=(
+                    f"PCI {pci_id} is a GPU generation before Gen12, which Intel's current "
+                    "compute runtime no longer supports; OpenVINO runs on the other devices"
+                ),
+            )
+        )
+        return checks
+
+    if kind is DeviceKind.GPU:
+        runtime_ok = bool(libraries.gpu_opencl)
+        runtime = _check(
+            f"drivers.{prefix}.runtime",
+            f"{label} runtime",
+            Severity.OK if runtime_ok else Severity.WARNING,
+            value="compute-runtime" if runtime_ok else "missing",
+            detail=(
+                "; ".join(libraries.gpu_opencl)
+                if runtime_ok
+                else "no OpenCL ICD names Intel's GPU driver (libigdrcl.so); OpenVINO's GPU "
+                "plugin needs it"
+            ),
+            remediation=[] if runtime_ok else install_steps(DriverComponent.GPU_RUNTIME, host),
+        )
+    else:
+        missing = [
+            name
+            for name, present in (
+                ("Level Zero loader (libze_loader.so.1)", libraries.level_zero_loader),
+                ("NPU driver (libze_intel_npu.so)", libraries.npu_level_zero),
+            )
+            if not present
+        ]
+        runtime_ok = not missing
+        runtime = _check(
+            f"drivers.{prefix}.runtime",
+            f"{label} runtime",
+            Severity.OK if runtime_ok else Severity.WARNING,
+            value="level-zero" if runtime_ok else "missing",
+            detail=(
+                _shortest(libraries.npu_level_zero)
+                if runtime_ok
+                else "missing: " + ", ".join(missing) + "; OpenVINO's NPU plugin needs both"
+            ),
+            remediation=[] if runtime_ok else install_steps(DriverComponent.NPU_RUNTIME, host),
+        )
+    checks.append(runtime)
+
+    if visible:
+        checks.append(
+            _check(
+                f"drivers.{prefix}.openvino",
+                f"{label} in OpenVINO",
+                Severity.OK,
+                value="listed",
+            )
+        )
+    elif inventory.openvino_available:
+        if not (kernel_ok and runtime_ok):
+            reason = "because of the missing driver above"
+            remediation = ["Install the driver named above, then run yonga doctor again."]
+        elif kind is DeviceKind.NPU and inventory.npu is not None and not inventory.npu.accessible:
+            reason = "because the accelerator node is not accessible (see the NPU section)"
+            remediation = ["Fix the node access reported in the NPU section."]
+        else:
+            reason = "although its drivers are installed"
+            remediation = [
+                "Check that the current user can open the device nodes "
+                "(/dev/dri/renderD* for a GPU, /dev/accel/accel* for an NPU).",
+                "A driver installed while this session was running may need a new login.",
+            ]
+        checks.append(
+            _check(
+                f"drivers.{prefix}.openvino",
+                f"{label} in OpenVINO",
+                Severity.WARNING,
+                value="not listed",
+                detail=f"OpenVINO lists no {kind.value} {reason}.",
+                remediation=remediation,
+            )
+        )
+    return checks
+
+
+def _shortest(paths: Sequence[str]) -> str:
+    """The shortest of several paths to one library (the unversioned name)."""
+    return min(paths, key=len) if paths else ""
+
+
 def _npu_node_check(node: NPUNodeInfo | None) -> HealthCheck:
     """Report ``/dev/accel/accel0`` existence and accessibility."""
     if node is None:
@@ -1437,8 +1683,7 @@ def _npu_node_check(node: NPUNodeInfo | None) -> HealthCheck:
             remediation=[
                 "Load the NPU kernel driver (the intel_vpu module) or install the "
                 "intel-npu driver package for your distribution.",
-                "yonga changes nothing about the kernel: run any module or package "
-                "command yourself.",
+                SYSTEM_CHANGES_NOTE,
             ],
         )
     if node.accessible:
@@ -1472,7 +1717,7 @@ def _npu_node_check(node: NPUNodeInfo | None) -> HealthCheck:
         remediation=[
             f"Inspect the node's owner with: ls -l {path}",
             "Then add your user to the group that owns it and log out and back in.",
-            "yonga never runs sudo and never changes permissions or group membership.",
+            SYSTEM_CHANGES_NOTE,
         ],
     )
 
@@ -1489,6 +1734,19 @@ def _npu_group_check(node: NPUNodeInfo | None) -> HealthCheck | None:
             value=node.group_name,
             detail="the current user is a member",
         )
+    if node.accessible:
+        # The node's mode lets everyone open it (no udev rule narrowed it to
+        # the group yet), so membership changes nothing today.
+        return _check(
+            "npu.group",
+            "Group",
+            Severity.INFO,
+            value=node.group_name,
+            detail=(
+                f"the current user is not a member of '{node.group_name}', "
+                "but the node is accessible anyway"
+            ),
+        )
     return _check(
         "npu.group",
         "Group",
@@ -1502,6 +1760,7 @@ def _npu_group_check(node: NPUNodeInfo | None) -> HealthCheck | None:
 def _npu_compiler_checks(
     node: NPUNodeInfo | None,
     properties: Mapping[str, str],
+    host: HostInfo,
 ) -> list[HealthCheck]:
     """Report the NPU driver version, compiler version and compiler libraries."""
     driver = npu_driver_version(properties) or (node.driver_version if node else None)
@@ -1519,15 +1778,38 @@ def _npu_compiler_checks(
                 "device appears in the Devices section.",
             ],
         ),
-        _fact(
-            "npu.compiler_version",
-            "compiler",
-            compiler,
-            unknown_remediation=[
-                "NPU_COMPILER_VERSION could not be read; this is informational only.",
-            ],
-        ),
     ]
+    if compiler == "0":
+        # Version 0 means no compiler answered: the driver could not load its
+        # compiler library, and no plugin compiler stood in for it (whatever
+        # NPU_COMPILER_TYPE says -- the default PREFER_PLUGIN is a preference,
+        # not proof one exists). Every graph compile then fails with
+        # ZE_RESULT_ERROR_UNSUPPORTED_FEATURE. Seen with Arch's intel-npu-driver,
+        # which ships the driver without the compiler.
+        checks.append(
+            _check(
+                "npu.compiler_version",
+                "compiler",
+                Severity.WARNING,
+                value="missing",
+                detail=(
+                    "the NPU driver reports compiler version 0: it found no compiler "
+                    "library, so no model can be compiled for the NPU"
+                ),
+                remediation=install_steps(DriverComponent.NPU_COMPILER, host),
+            )
+        )
+    else:
+        checks.append(
+            _fact(
+                "npu.compiler_version",
+                "compiler",
+                compiler,
+                unknown_remediation=[
+                    "NPU_COMPILER_VERSION could not be read; this is informational only.",
+                ],
+            )
+        )
 
     if in_plugin is None:
         checks.append(
@@ -1556,43 +1838,66 @@ def _npu_compiler_checks(
             )
         )
 
-    if libraries:
-        checks.append(
-            _check(
-                "npu.compiler_libraries",
-                "compiler libraries",
-                Severity.OK,
-                value=f"{len(libraries)} found",
-                detail="; ".join(libraries[:3]),
-            )
-        )
-    elif in_plugin:
-        checks.append(
-            _check(
-                "npu.compiler_libraries",
-                "compiler libraries",
-                Severity.INFO,
-                value="none found",
-                detail="not needed: the NPU plugin ships its own compiler.",
-            )
-        )
-    else:
-        checks.append(
-            _check(
-                "npu.compiler_libraries",
-                "compiler libraries",
-                Severity.WARNING,
-                value="none found",
-                detail="no libopenvino_intel_npu_compiler*.so was found in the "
-                "searched library directories.",
-                remediation=[
-                    "Install your distribution's Intel NPU driver/compiler package "
-                    "(it provides libopenvino_intel_npu_compiler.so).",
-                    "NPU compilation may still work if the plugin carries its own compiler.",
-                ],
-            )
-        )
+    checks.append(_npu_compiler_libraries_check(libraries, compiler, in_plugin, host))
     return checks
+
+
+#: The pair the NPU driver loads to compile: it opens the loader by name, and
+#: the loader opens the compiler next to it.
+_NPU_COMPILER_FILES: tuple[str, ...] = (
+    "libopenvino_intel_npu_compiler.so",
+    "libopenvino_intel_npu_compiler_loader.so",
+)
+
+
+def _npu_compiler_libraries_check(
+    libraries: Sequence[str],
+    compiler: str | None,
+    in_plugin: bool | None,
+    host: HostInfo,
+) -> HealthCheck:
+    """Whether both NPU compiler libraries are present, or a compiler answers anyway."""
+    names = {Path(path).name.split(".so")[0] + ".so" for path in libraries}
+    missing = [name for name in _NPU_COMPILER_FILES if name not in names]
+    found = f"{len(libraries)} found" if libraries else "none found"
+    if not missing:
+        return _check(
+            "npu.compiler_libraries",
+            "compiler libraries",
+            Severity.OK,
+            value=found,
+            detail="; ".join(libraries[:3]),
+        )
+    if compiler not in (None, "0"):
+        # A compiler answered, so where it was loaded from does not matter.
+        return _check(
+            "npu.compiler_libraries",
+            "compiler libraries",
+            Severity.INFO,
+            value=found,
+            detail=f"the compiler answers (version {compiler}) without them on these paths",
+        )
+    if compiler is None and in_plugin and not libraries:
+        return _check(
+            "npu.compiler_libraries",
+            "compiler libraries",
+            Severity.INFO,
+            value=found,
+            detail="not needed if the NPU plugin carries its own compiler.",
+        )
+    return _check(
+        "npu.compiler_libraries",
+        "compiler libraries",
+        Severity.WARNING,
+        value=found if not libraries else f"{', '.join(missing)} missing",
+        detail=(
+            "the NPU driver needs both "
+            + " and ".join(_NPU_COMPILER_FILES)
+            + "; missing from the searched library directories: "
+            + ", ".join(missing)
+        ),
+        remediation=install_steps(DriverComponent.NPU_COMPILER, host),
+    )
 
 
 def _space_check(

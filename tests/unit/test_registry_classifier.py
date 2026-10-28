@@ -202,6 +202,39 @@ def test_an_uninitialised_driver_is_still_a_driver_problem():
     assert result.category is FailureCategory.DRIVER_MISSING
 
 
+#: Verbatim from preparing Qwen3-4B for the NPU with Arch's intel-npu-driver,
+#: which ships no compiler library.
+NPU_DRIVER_COMPILER_MISSING_ERROR = (
+    "Exception from src/inference/src/cpp/core.cpp:117:\n"
+    "Exception from src/inference/src/dev/plugin.cpp:54:\n"
+    "Exception from src/plugins/intel_npu/src/plugin/src/plugin.cpp:560:\n"
+    "Exception from src/plugins/intel_npu/src/compiler_adapter/src/"
+    "ze_graph_ext_wrappers.cpp:425:\n"
+    "Compilation failed. Level0 pfnCreate2 result: ZE_RESULT_ERROR_UNSUPPORTED_FEATURE, "
+    "code 0x78000003 - generic error code for unsupported features . \n"
+)
+
+
+def test_an_unsupported_feature_names_both_causes_and_keeps_the_fallback():
+    """The text alone cannot tell a missing compiler from an IR it cannot take."""
+    result = resolver().classify(raw_error=NPU_DRIVER_COMPILER_MISSING_ERROR, device="npu")
+    assert result.code == "npu.compiler.unsupported_feature"
+    assert result.matched_rule_id == "npu-unsupported-feature"
+    assert result.category is FailureCategory.COMPILER_UNSUPPORTED_GRAPH
+    assert result.environment_broken is False
+    assert result.fallback_devices == ["GPU", "CPU"]
+    remediation = " ".join(result.remediation)
+    assert "libopenvino_intel_npu_compiler_loader.so" in remediation
+    assert "yonga doctor" in remediation
+    assert "--device gpu" in remediation
+
+
+def test_a_compiler_that_answered_still_wins_over_the_missing_compiler_rule():
+    raw = NPU_DRIVER_COMPILER_MISSING_ERROR + "[NPU_VCL] Compiler returned msg:\nFailed Pass"
+    result = resolver().classify(raw_error=raw, device="npu")
+    assert result.code == "npu.compiler.pass_failed"
+
+
 def test_dynamic_shape_signature():
     result = resolver().classify(
         raw_error=RuntimeError(NPU_DYNAMIC_SHAPE_ERROR), device="npu", meta=llama_metadata()

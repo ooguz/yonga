@@ -19,6 +19,28 @@ manifest may change in any minor release.
   into a provider you already have it writes only `npm`, `options.baseURL` and `options.apiKey`.
   `--remove ARTIFACT` takes back only the entries it wrote and keeps any you edited since;
   `yonga remove` points to it, with `--config` when the connection is in another file.
+- `yonga doctor` has a **Drivers** section: it finds the Intel GPUs and NPUs on the PCI bus,
+  whatever OpenVINO makes of them, and checks for each one the kernel driver, the user-space
+  driver OpenVINO's plugin loads (Intel's OpenCL compute runtime for a GPU, the Level Zero loader
+  and NPU driver for an NPU) and whether OpenVINO lists it. A missing driver comes with the
+  install command for the host's distribution family: Arch and derivatives such as CachyOS,
+  Debian and Ubuntu, or Fedora.
+- A known failure for `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE` from the NPU driver without a
+  compiler message (`npu.compiler.unsupported_feature`), which Arch's `intel-npu-driver` package
+  causes by leaving the compiler out: it was reported as an unrecognised failure. It names both
+  causes (no compiler library, or a compiler that cannot take the IR) and keeps the GPU/CPU
+  fallback; `doctor` tells them apart.
+
+### Fixed
+
+- `doctor` reports an NPU driver that loaded no compiler (`NPU_COMPILER_VERSION` 0) as a warning
+  instead of a plain version line, whatever `NPU_COMPILER_TYPE` says.
+- `doctor`'s `compiler libraries` line needs both `libopenvino_intel_npu_compiler.so` and
+  `libopenvino_intel_npu_compiler_loader.so`, and no longer counts
+  `libopenvino_intel_npu_plugin.so`, which every `openvino` wheel ships; it gives the same advice
+  as the compiler line. `/usr/lib64` is searched too, where Fedora installs the libraries.
+- `doctor` no longer tells the user to join the NPU node's group, with a `sudo usermod` command,
+  when the node is accessible to them anyway.
 
 ## [0.5.1] - 2026-10-11
 

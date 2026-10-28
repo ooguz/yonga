@@ -26,6 +26,7 @@ from yonga.application.doctor import (
     DoctorService,
     group_membership_remediation,
 )
+from yonga.application.drivers import SYSTEM_CHANGES_NOTE, DriverComponent, install_steps
 from yonga.application.self_install import (
     CommandRelation,
     InstallationStatus,
@@ -39,6 +40,7 @@ from yonga.domain.diagnostics import ExitCode, HealthCheck, HealthSection, Sever
 from yonga.domain.environments import EnvironmentSpec, ExportEnvironment
 from yonga.domain.hardware import (
     DeviceKind,
+    DriverLibraries,
     FilesystemInfo,
     HardwareInventory,
     HostInfo,
@@ -47,6 +49,7 @@ from yonga.domain.hardware import (
     NPUNodeInfo,
     OpenVINODevice,
     PackageInfo,
+    PciAccelerator,
 )
 from yonga.domain.models import ModelIdentity, ModelMetadata
 from yonga.registry import load_builtin_registry
@@ -879,6 +882,400 @@ def test_missing_accel_node_with_an_npu_device_warns(tmp_path):
     assert check is not None
     assert check.status is Severity.WARNING
     assert "intel_vpu" in " ".join(check.remediation)
+
+
+def test_an_accessible_node_does_not_ask_for_group_membership(tmp_path):
+    """A world-accessible node (no udev rule yet) needs no group: no sudo advice."""
+    settings = make_settings(tmp_path)
+    node = npu_node(readable=True, writable=True, group_name="render", user_in_group=False)
+    service, _, _, _ = build(settings, healthy_inventory(settings, npu=node))
+
+    report = service.run()
+
+    group_check = require(report, "npu.group")
+    assert group_check.status is Severity.INFO
+    assert group_check.remediation == []
+    assert require(report, "npu.node").status is Severity.OK
+
+
+@pytest.mark.parametrize(
+    # DRIVER is what the CachyOS laptop reported; PREFER_PLUGIN is OpenVINO 2026's
+    # default and only a preference, so version 0 must warn under it too.
+    "compiler_type",
+    ["CompilerType.DRIVER", "CompilerType.PREFER_PLUGIN"],
+)
+def test_a_driver_reporting_compiler_version_zero_warns_that_the_compiler_is_missing(
+    tmp_path, compiler_type
+):
+    settings = make_settings(tmp_path)
+    found = devices()
+    properties = dict(NPU_PROPERTIES, NPU_COMPILER_VERSION="0", NPU_COMPILER_TYPE=compiler_type)
+    found[2] = found[2].model_copy(update={"properties": properties})
+    node = npu_node().model_copy(update={"compiler_libraries": []})
+    service, _, _, _ = build(settings, healthy_inventory(settings, devices=found, npu=node))
+
+    report = service.run()
+
+    check = require(report, "npu.compiler_version")
+    assert check.status is Severity.WARNING
+    assert check.value == "missing"
+    # The test host is Ubuntu: the Debian family's package is named.
+    assert check.remediation == install_steps(DriverComponent.NPU_COMPILER, inventory_host())
+    assert "intel-driver-compiler-npu" in " ".join(check.remediation)
+    # The libraries line gives the same advice for the same cause.
+    libraries = require(report, "npu.compiler_libraries")
+    assert libraries.status is Severity.WARNING
+    assert libraries.remediation == check.remediation
+
+
+def npu_with(settings: Settings, *, version: str, libraries: list[str]) -> HardwareInventory:
+    """The healthy inventory with the NPU's compiler version and libraries replaced."""
+    found = devices()
+    found[2] = found[2].model_copy(
+        update={"properties": dict(NPU_PROPERTIES, NPU_COMPILER_VERSION=version)}
+    )
+    node = npu_node().model_copy(update={"compiler_libraries": libraries})
+    return healthy_inventory(settings, devices=found, npu=node)
+
+
+def test_half_of_the_compiler_pair_is_not_enough(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = npu_with(
+        settings, version="0", libraries=["/usr/lib/libopenvino_intel_npu_compiler.so"]
+    )
+    service, _, _, _ = build(settings, inventory)
+
+    check = require(service.run(), "npu.compiler_libraries")
+
+    assert check.status is Severity.WARNING
+    assert "libopenvino_intel_npu_compiler_loader.so" in (check.value or "")
+    assert check.remediation == install_steps(DriverComponent.NPU_COMPILER, inventory_host())
+
+
+def test_a_compiler_that_answers_needs_no_library_on_the_searched_paths(tmp_path):
+    settings = make_settings(tmp_path)
+    service, _, _, _ = build(settings, npu_with(settings, version="524291", libraries=[]))
+
+    check = require(service.run(), "npu.compiler_libraries")
+
+    assert check.status is Severity.INFO
+    assert "524291" in (check.detail or "")
+
+
+def test_versioned_library_names_count_as_the_pair(tmp_path):
+    settings = make_settings(tmp_path)
+    libraries = [
+        "/usr/lib64/libopenvino_intel_npu_compiler.so.1",
+        "/usr/lib64/libopenvino_intel_npu_compiler_loader.so.1.38.0",
+    ]
+    service, _, _, _ = build(settings, npu_with(settings, version="0", libraries=libraries))
+
+    assert require(service.run(), "npu.compiler_libraries").status is Severity.OK
+
+
+def test_a_real_compiler_version_is_reported_as_a_fact(tmp_path):
+    settings = make_settings(tmp_path)
+    service, _, _, _ = build(settings, healthy_inventory(settings))
+
+    check = require(service.run(), "npu.compiler_version")
+
+    assert check.status is Severity.OK
+    assert check.value == "524291"
+
+
+# --- drivers --------------------------------------------------------------------------
+
+
+def inventory_host(**overrides: object) -> HostInfo:
+    """The Ubuntu host :func:`healthy_inventory` describes, with overrides."""
+    base = HostInfo(
+        platform="Linux",
+        machine="x86_64",
+        distro_id="ubuntu",
+        distro_like=["debian"],
+        distro_pretty="Ubuntu 26.04.1 LTS",
+    )
+    return base.model_copy(update=dict(overrides))
+
+
+def lunar_lake_accelerators(
+    *, gpu_driver: str | None = "xe", npu_driver: str | None = "intel_vpu"
+) -> list[PciAccelerator]:
+    """The reference host's iGPU and NPU on the PCI bus."""
+    return [
+        PciAccelerator(
+            kind=DeviceKind.GPU,
+            address="0000:00:02.0",
+            vendor_id="0x8086",
+            device_id="0x64a0",
+            kernel_driver=gpu_driver,
+        ),
+        PciAccelerator(
+            kind=DeviceKind.NPU,
+            address="0000:00:0b.0",
+            vendor_id="0x8086",
+            device_id="0x643e",
+            kernel_driver=npu_driver,
+        ),
+    ]
+
+
+def installed_driver_libraries(**overrides: list[str]) -> DriverLibraries:
+    """Every user-space driver present, unless an override empties one."""
+    values: dict[str, list[str]] = {
+        "gpu_opencl": ["/usr/lib/x86_64-linux-gnu/intel-opencl/libigdrcl.so"],
+        "level_zero_loader": ["/usr/lib/x86_64-linux-gnu/libze_loader.so.1"],
+        "npu_level_zero": ["/usr/lib/x86_64-linux-gnu/libze_intel_npu.so.1"],
+    }
+    values.update(overrides)
+    return DriverLibraries(**values)
+
+
+def drivers_inventory(settings: Settings, **overrides: object) -> HardwareInventory:
+    """:func:`healthy_inventory` with the PCI bus and the driver libraries read."""
+    base: dict[str, object] = {
+        "host": inventory_host(),
+        "accelerators": lunar_lake_accelerators(),
+        "driver_libraries": installed_driver_libraries(),
+    }
+    base.update(overrides)
+    return healthy_inventory(settings, **base)
+
+
+def test_a_host_with_every_driver_installed_has_a_clean_drivers_section(tmp_path):
+    settings = make_settings(tmp_path)
+    service, _, _, _ = build(settings, drivers_inventory(settings))
+
+    report = service.run()
+
+    section = require_section(report, "drivers")
+    assert section.status is Severity.OK
+    assert [check.id for check in section.checks] == [
+        "drivers.gpu.kernel",
+        "drivers.gpu.runtime",
+        "drivers.gpu.openvino",
+        "drivers.npu.kernel",
+        "drivers.npu.runtime",
+        "drivers.npu.openvino",
+    ]
+    assert require(report, "drivers.gpu.kernel").value == "xe"
+    assert "8086:64a0" in (require(report, "drivers.gpu.kernel").detail or "")
+    # Drivers come straight after Devices.
+    ids = [s.id for s in report.sections]
+    assert ids.index("drivers") == ids.index("devices") + 1
+
+
+def test_a_missing_gpu_runtime_names_the_package_of_this_distribution(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = drivers_inventory(
+        settings,
+        host=inventory_host(distro_id="cachyos", distro_like=["arch"]),
+        driver_libraries=installed_driver_libraries(gpu_opencl=[]),
+        devices=[d for d in devices() if d.name != "GPU"],
+    )
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "NPU"))
+
+    report = service.run()
+
+    runtime = require(report, "drivers.gpu.runtime")
+    assert runtime.status is Severity.WARNING
+    assert runtime.value == "missing"
+    assert any("sudo pacman -S intel-compute-runtime" in line for line in runtime.remediation)
+    assert runtime.remediation[-1] == SYSTEM_CHANGES_NOTE
+    listed = require(report, "drivers.gpu.openvino")
+    assert listed.status is Severity.WARNING
+    assert "missing driver" in (listed.detail or "")
+
+
+def test_a_missing_npu_runtime_on_ubuntu_points_at_intels_release(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = drivers_inventory(
+        settings,
+        driver_libraries=installed_driver_libraries(level_zero_loader=[], npu_level_zero=[]),
+        devices=devices(npu=False),
+    )
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "GPU"))
+
+    report = service.run()
+
+    runtime = require(report, "drivers.npu.runtime")
+    assert runtime.status is Severity.WARNING
+    assert "libze_loader.so.1" in (runtime.detail or "")
+    assert "libze_intel_npu.so" in (runtime.detail or "")
+    joined = " ".join(runtime.remediation)
+    assert "intel-level-zero-npu" in joined
+    assert "github.com/intel/linux-npu-driver" in joined
+
+
+def test_an_accelerator_without_a_kernel_driver_says_which_module_to_load(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = drivers_inventory(
+        settings, accelerators=lunar_lake_accelerators(npu_driver=None), devices=devices(npu=False)
+    )
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "GPU"))
+
+    report = service.run()
+
+    kernel = require(report, "drivers.npu.kernel")
+    assert kernel.status is Severity.WARNING
+    assert kernel.value == "no driver"
+    assert "modprobe intel_vpu" in " ".join(kernel.remediation)
+
+
+def test_drivers_present_but_device_unlisted_points_at_device_access(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = drivers_inventory(settings, devices=[d for d in devices() if d.name != "GPU"])
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "NPU"))
+
+    report = service.run()
+
+    listed = require(report, "drivers.gpu.openvino")
+    assert listed.status is Severity.WARNING
+    assert "/dev/dri/renderD" in " ".join(listed.remediation)
+
+
+def test_an_inaccessible_npu_node_explains_why_openvino_does_not_list_it(tmp_path):
+    settings = make_settings(tmp_path)
+    node = npu_node(readable=False, writable=False, user_in_group=False)
+    inventory = drivers_inventory(settings, npu=node, devices=devices(npu=False))
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "GPU"))
+
+    listed = require(service.run(), "drivers.npu.openvino")
+
+    assert listed.status is Severity.WARNING
+    assert "not accessible" in (listed.detail or "")
+
+
+def test_two_gpus_are_reported_separately_by_pci_address(tmp_path):
+    settings = make_settings(tmp_path)
+    accelerators = [
+        *lunar_lake_accelerators(),
+        PciAccelerator(
+            kind=DeviceKind.GPU,
+            address="0000:03:00.0",
+            vendor_id="0x8086",
+            device_id="0xe20b",
+            kernel_driver="xe",
+        ),
+    ]
+    inventory = drivers_inventory(settings, accelerators=accelerators)
+    # OpenVINO's own names for two GPUs; the Devices section folds them into GPU.
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "GPU.0", "GPU.1", "NPU"))
+
+    report = service.run()
+
+    assert require(report, "drivers.gpu0.openvino").status is Severity.OK
+    assert require(report, "drivers.gpu1.openvino").status is Severity.OK
+    assert require(report, "drivers.gpu1.kernel").label == "GPU 0000:03:00.0 kernel"
+    assert require_section(report, "drivers").status is Severity.OK
+
+
+def test_the_second_of_two_gpus_warns_when_openvino_lists_only_one(tmp_path):
+    settings = make_settings(tmp_path)
+    accelerators = [
+        *lunar_lake_accelerators(),
+        PciAccelerator(
+            kind=DeviceKind.GPU,
+            address="0000:03:00.0",
+            vendor_id="0x8086",
+            device_id="0xe20b",
+            kernel_driver="xe",
+        ),
+    ]
+    inventory = drivers_inventory(settings, accelerators=accelerators)
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "GPU", "NPU"))
+
+    second = require(service.run(), "drivers.gpu1.openvino")
+
+    assert second.status is Severity.WARNING
+    assert second.label == "GPU 0000:03:00.0 in OpenVINO"
+
+
+def test_a_device_claimed_by_another_driver_is_not_told_to_modprobe(tmp_path):
+    settings = make_settings(tmp_path)
+    inventory = drivers_inventory(
+        settings,
+        accelerators=lunar_lake_accelerators(gpu_driver="vfio-pci"),
+        devices=[d for d in devices() if d.name != "GPU"],
+    )
+    service, _, _, _ = build(settings, inventory, device_names=("CPU", "NPU"))
+
+    kernel = require(service.run(), "drivers.gpu.kernel")
+
+    assert kernel.status is Severity.WARNING
+    assert kernel.value == "vfio-pci"
+    joined = " ".join(kernel.remediation)
+    assert "claimed by the 'vfio-pci'" in joined
+    assert "modprobe" not in joined
+
+
+def test_an_older_gpu_generation_is_informational_not_a_driver_to_install(tmp_path):
+    settings = make_settings(tmp_path)
+    coffee_lake = PciAccelerator(
+        kind=DeviceKind.GPU,
+        address="0000:00:02.0",
+        vendor_id="0x8086",
+        device_id="0x3e9b",
+        kernel_driver="i915",
+    )
+    inventory = drivers_inventory(
+        settings,
+        accelerators=[coffee_lake],
+        driver_libraries=installed_driver_libraries(gpu_opencl=[]),
+        devices=[d for d in devices() if d.name == "CPU"],
+    )
+    service, _, _, _ = build(settings, inventory, device_names=("CPU",))
+
+    report = service.run()
+
+    runtime = require(report, "drivers.gpu.runtime")
+    assert runtime.status is Severity.INFO
+    assert runtime.remediation == []
+    assert report.check("drivers.gpu.openvino") is None
+    assert require_section(report, "drivers").status in (Severity.OK, Severity.INFO)
+
+
+class FakeDriverProbe(FakeHardwareProbe):
+    """A hardware probe that can also list the PCI bus and the driver libraries."""
+
+    def __init__(self, inventory: HardwareInventory) -> None:
+        super().__init__(inventory)
+        self.calls: list[str] = []
+
+    def pci_accelerators(self, notes: list[str] | None = None) -> list[PciAccelerator] | None:
+        self.calls.append("pci_accelerators")
+        return lunar_lake_accelerators()
+
+    def driver_libraries(self) -> DriverLibraries:
+        self.calls.append("driver_libraries")
+        return installed_driver_libraries()
+
+
+def test_doctor_asks_a_driver_probe_for_the_bus_and_the_libraries(tmp_path):
+    settings = make_settings(tmp_path)
+    hardware = FakeDriverProbe(healthy_inventory(settings, host=inventory_host()))
+    service = DoctorService(hardware, FakeRuntimeProbe(("CPU", "GPU", "NPU")), None, None, settings)
+
+    report = service.run()
+
+    assert hardware.calls == ["pci_accelerators", "driver_libraries"]
+    assert require_section(report, "drivers").status is Severity.OK
+
+
+def test_no_intel_accelerator_is_informational(tmp_path):
+    settings = make_settings(tmp_path)
+    service, _, _, _ = build(settings, drivers_inventory(settings, accelerators=[]))
+
+    check = require(service.run(), "drivers.none")
+
+    assert check.status is Severity.INFO
+
+
+def test_an_unread_pci_bus_leaves_the_drivers_section_out(tmp_path):
+    settings = make_settings(tmp_path)
+    service, _, _, _ = build(settings, healthy_inventory(settings))
+
+    assert service.run().section("drivers") is None
 
 
 # --- storage --------------------------------------------------------------------------
