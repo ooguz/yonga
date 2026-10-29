@@ -1,6 +1,6 @@
 # Command reference
 
-Every yonga command and subcommand, with its options and defaults as `yonga <command> --help` prints them in yonga 0.5.1, plus one example each. The guides explain when to use each command; this page is for looking things up. The full behaviour of every command, including its `--json` document, is specified in [CLI_SPEC.md](https://github.com/ooguz/yonga/blob/main/docs/CLI_SPEC.md).
+Every yonga command and subcommand, with its options and defaults as `yonga <command> --help` prints them in yonga 0.6.0, plus one example each. The guides explain when to use each command; this page is for looking things up. The full behaviour of every command, including its `--json` document, is specified in [CLI_SPEC.md](https://github.com/ooguz/yonga/blob/main/docs/CLI_SPEC.md).
 
 In the option tables, a dash in the **Default** column means `--help` shows no default: the option is off, or yonga decides from the artifact, the registry or the configuration, as the description says. Every command and command group also accepts `--help`, which is not repeated below.
 
@@ -54,6 +54,7 @@ yonga --offline --debug prepare Qwen/Qwen3-0.6B
 | [`env`](#yonga-env) | List and remove the managed environments exports run in. |
 | [`cache`](#yonga-cache) | Show and prune the OpenVINO compile cache. |
 | [`self`](#yonga-self) | Put the yonga AppImage on PATH as 'yonga', or take it off again. |
+| [`connect`](#yonga-connect) | Register a prepared artifact with a client that talks to 'yonga serve'. |
 
 Where a command takes `MODEL_OR_ARTIFACT` or `ARTIFACT`, you can pass an artifact id from `yonga list` (or a unique prefix of at least six characters), the artifact's directory, or a Hugging Face repository id. For a repository id with several prepared artifacts, the read-only commands use the newest ready one; `remove` refuses and lists them.
 
@@ -634,4 +635,39 @@ Remove the AppImage copy at `~/.local/bin/yonga`. Models and caches are kept.
 
 ```bash
 yonga self uninstall
+```
+
+## yonga connect
+
+```text
+yonga connect [OPTIONS] COMMAND [ARGS]...
+```
+
+Register a prepared artifact with a client that talks to 'yonga serve'.
+
+### connect opencode
+
+```text
+yonga connect opencode [OPTIONS] ARTIFACT
+```
+
+Add a prepared artifact to OpenCode's config as a 'yonga serve' provider, with the context and output limits read from the artifact. It shows the change and asks first, and refuses an artifact OpenCode cannot use: one without tool calling, or one whose prompt length is fixed under 8192 tokens, as every built-in NPU profile is. See [Use it from OpenCode](../guide/serve.md#opencode).
+
+| Argument | Description |
+|---|---|
+| `ARTIFACT` | Artifact id, repo id or path. Required. With `--remove`, the recorded id. |
+
+| Option | Value | Default | Description |
+|---|---|---|---|
+| `--remove` | | off | Take the connection back out; ARTIFACT is the recorded id. |
+| `--host` | text | `127.0.0.1` | Address 'yonga serve' listens on. |
+| `--port` | integer, 1–65535 | `8000` | Port 'yonga serve' listens on. |
+| `--device` | text | `auto` | `auto`, `npu`, `gpu` or `cpu`, resolved as `serve` resolves it. |
+| `--context` | integer, at least 1 | – | Context limit to write, instead of the one read from the artifact. |
+| `--config` | `PATH` | `~/.config/opencode/opencode.json` | The OpenCode file to edit; `$XDG_CONFIG_HOME/opencode/opencode.json` when `XDG_CONFIG_HOME` is set. |
+| `--yes`, `-y` | | off | Do not ask before writing. |
+| `--json` | | off | Emit the outcome as JSON. |
+
+```bash
+yonga connect opencode 073d5d7c8ea75283 --port 8765
 ```

@@ -1,6 +1,6 @@
 # Komut başvurusu
 
-yonga 0.5.1'deki her komut ve alt komut; seçenekleri ve varsayılanlarıyla, `yonga <komut> --help` çıktısında göründükleri gibi, her biri için bir örnekle birlikte. Hangi komutun ne zaman kullanılacağını kılavuzlar anlatır; bu sayfa bir şeye hızlıca bakmak içindir. Her komutun `--json` belgesi dahil tüm davranışı [CLI_SPEC.md](https://github.com/ooguz/yonga/blob/main/docs/CLI_SPEC.md) belgesinde tanımlanmıştır (İngilizce).
+yonga 0.6.0'daki her komut ve alt komut; seçenekleri ve varsayılanlarıyla, `yonga <komut> --help` çıktısında göründükleri gibi, her biri için bir örnekle birlikte. Hangi komutun ne zaman kullanılacağını kılavuzlar anlatır; bu sayfa bir şeye hızlıca bakmak içindir. Her komutun `--json` belgesi dahil tüm davranışı [CLI_SPEC.md](https://github.com/ooguz/yonga/blob/main/docs/CLI_SPEC.md) belgesinde tanımlanmıştır (İngilizce).
 
 Seçenek tablolarında **Varsayılan** sütunundaki kısa çizgi, `--help` çıktısının bir varsayılan göstermediği anlamına gelir: seçenek kapalıdır ya da açıklamada belirtildiği gibi yonga hazırlanmış modele (artifact), uyumluluk kayıt defterine (registry) veya yapılandırmaya göre karar verir. Her komut ve komut grubu ayrıca `--help` seçeneğini de kabul eder; aşağıda yinelenmemiştir.
 
@@ -54,6 +54,7 @@ Komutsuz çalıştırılan `yonga` komut listesini yazdırır ve 70 çıkış ko
 | [`env`](#yonga-env) | Dışa aktarmaların çalıştığı yönetilen ortamları listeler ve kaldırır. |
 | [`cache`](#yonga-cache) | OpenVINO derleme önbelleğini gösterir ve budar. |
 | [`self`](#yonga-self) | yonga AppImage'ını `PATH` üzerine 'yonga' olarak koyar ya da yeniden kaldırır. |
+| [`connect`](#yonga-connect) | Hazırlanmış bir artifact'i 'yonga serve' ile konuşan bir istemciye kaydeder. |
 
 Bir komut `MODEL_OR_ARTIFACT` ya da `ARTIFACT` aldığında `yonga list` çıktısındaki bir artifact kimliğini (ya da en az altı karakterlik benzersiz bir önekini), artifact'in dizinini veya bir Hugging Face depo kimliğini verebilirsiniz. Birden çok hazırlanmış artifact'i olan bir depo kimliğinde, yalnızca okuyan komutlar en yeni hazır olanı kullanır; `remove` ise reddeder ve hepsini listeler.
 
@@ -634,4 +635,39 @@ yonga self uninstall [OPTIONS]
 
 ```bash
 yonga self uninstall
+```
+
+## yonga connect
+
+```text
+yonga connect [OPTIONS] COMMAND [ARGS]...
+```
+
+Hazırlanmış bir artifact'i 'yonga serve' ile konuşan bir istemciye kaydeder.
+
+### connect opencode
+
+```text
+yonga connect opencode [OPTIONS] ARTIFACT
+```
+
+Hazırlanmış bir artifact'i, bağlam ve çıktı sınırlarını artifact'ten okuyarak, OpenCode yapılandırmasına bir 'yonga serve' sağlayıcısı olarak ekler. Değişikliği gösterir ve önce sorar; OpenCode'un kullanamayacağı bir artifact'i reddeder: araç çağırma desteği olmayanı ya da istem uzunluğu 8192 token'ın altında sabitlenmiş olanı (yerleşik NPU profillerinin hepsi böyledir). [OpenCode ile kullanın](../guide/serve.md#opencode) bölümüne bakın.
+
+| Argüman | Açıklama |
+|---|---|
+| `ARTIFACT` | Artifact kimliği, depo kimliği ya da yolu. Zorunlu. `--remove` ile kaydedilmiş kimlik. |
+
+| Seçenek | Değer | Varsayılan | Açıklama |
+|---|---|---|---|
+| `--remove` | | kapalı | Bağlantıyı geri al; ARTIFACT kaydedilmiş kimliktir. |
+| `--host` | metin | `127.0.0.1` | 'yonga serve' komutunun dinlediği adres. |
+| `--port` | tamsayı, 1–65535 | `8000` | 'yonga serve' komutunun dinlediği bağlantı noktası. |
+| `--device` | metin | `auto` | `auto`, `npu`, `gpu` ya da `cpu`; `serve` nasıl çözüyorsa öyle çözülür. |
+| `--context` | tamsayı, en az 1 | – | Artifact'ten okunan yerine yazılacak bağlam sınırı. |
+| `--config` | `PATH` | `~/.config/opencode/opencode.json` | Düzenlenecek OpenCode dosyası; `XDG_CONFIG_HOME` tanımlıysa `$XDG_CONFIG_HOME/opencode/opencode.json`. |
+| `--yes`, `-y` | | kapalı | Yazmadan önce sorma. |
+| `--json` | | kapalı | Sonucu JSON olarak ver. |
+
+```bash
+yonga connect opencode 073d5d7c8ea75283 --port 8765
 ```

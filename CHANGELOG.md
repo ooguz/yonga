@@ -9,6 +9,12 @@ manifest may change in any minor release.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-29
+
+`yonga connect opencode` puts a prepared artifact into OpenCode, and `yonga doctor` now checks the
+system drivers each Intel GPU and NPU needs. The Drivers section and the NPU compiler diagnosis are
+yonga's first outside contribution, by @cybermaksx in #4: thank you!
+
 ### Added
 
 - **`yonga connect opencode ARTIFACT`** adds a prepared artifact to OpenCode's config as a
@@ -968,7 +974,8 @@ printing compiler tracebacks. Linux x86_64 only.
 - `yonga` never installs, upgrades or removes packages, and never runs `sudo`. When
   the environment is wrong it prints the command for you to run.
 
-[Unreleased]: https://github.com/ooguz/yonga/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/ooguz/yonga/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/ooguz/yonga/releases/tag/v0.6.0
 [0.5.1]: https://github.com/ooguz/yonga/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ooguz/yonga/tree/v0.5.0
 [0.4.0]: https://github.com/ooguz/yonga/tree/v0.4.0
