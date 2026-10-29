@@ -8,8 +8,8 @@ hide:
   - navigation
   - toc
 home:
-  badge: v0.5.1 · first public release
-  badge_link: https://github.com/ooguz/yonga/releases/tag/v0.5.1
+  badge: v0.6.0 · latest release
+  badge_link: https://github.com/ooguz/yonga/releases/tag/v0.6.0
   title: Hugging Face models on your Intel <em>NPU, GPU and CPU</em>.
   lead: >-
     Give yonga a model id. It inspects your machine, picks a device and a quantization profile,
@@ -22,9 +22,9 @@ home:
   install_tabs:
     - name: AppImage
       code: |-
-        curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage
-        chmod +x yonga-0.5.1-x86_64.AppImage
-        ./yonga-0.5.1-x86_64.AppImage self install
+        curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage
+        chmod +x yonga-0.6.0-x86_64.AppImage
+        ./yonga-0.6.0-x86_64.AppImage self install
     - name: pip
       code: |-
         python3 -m venv ~/.venvs/yonga

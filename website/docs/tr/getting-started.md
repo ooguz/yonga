@@ -29,11 +29,11 @@ grubu ayarı `sudo` gerektirir; bu komutları kendiniz çalıştırırsınız (b
     Dosyayı sağlama toplamıyla birlikte indirin, doğrulayın ve `yonga` komutu olarak kurun:
 
     ```bash
-    curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage
-    curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage.sha256
-    sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
-    chmod +x yonga-0.5.1-x86_64.AppImage
-    ./yonga-0.5.1-x86_64.AppImage self install
+    curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage
+    curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage.sha256
+    sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
+    chmod +x yonga-0.6.0-x86_64.AppImage
+    ./yonga-0.6.0-x86_64.AppImage self install
     ```
 
     `self install` dosyayı `~/.local/bin/yonga` konumuna kopyalar. Bu dizin henüz `PATH` içinde

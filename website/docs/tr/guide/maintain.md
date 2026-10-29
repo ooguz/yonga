@@ -246,8 +246,8 @@ Sık görülen uyarıları [Sorun giderme](../troubleshooting.md), NPU sürücü
 AppImage kendini `yonga` komutu olarak kurabilir. İndirdiğiniz dosyadan şunu çalıştırın:
 
 ```bash
-chmod +x yonga-0.5.1-x86_64.AppImage
-./yonga-0.5.1-x86_64.AppImage self install
+chmod +x yonga-0.6.0-x86_64.AppImage
+./yonga-0.6.0-x86_64.AppImage self install
 ```
 
 AppImage'ı `~/.local/bin/yonga` konumuna kopyalar (başka bir dizin için `--bin-dir DIR`) ve `PATH` üzerindeki `yonga` komutunun artık bu kopyayı çalıştırıp çalıştırmadığını denetler. Çalıştırmıyorsa ne yapmanız gerektiğini söyler ve 2 çıkış koduyla sonlanır: Ubuntu ve Debian'da ilk kurulumdan sonra bir kez oturumu kapatıp yeniden açın ya da geçerli kabukta `export PATH="$HOME/.local/bin:$PATH"` komutunu çalıştırın. yonga kabuk başlangıç dosyalarınızı asla düzenlemez ve asla `sudo` kullanmaz.

@@ -29,11 +29,11 @@ still needs it, takes `sudo`, and you run those commands yourself (see
     it with its checksum, check it, and install it as the `yonga` command:
 
     ```bash
-    curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage
-    curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage.sha256
-    sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
-    chmod +x yonga-0.5.1-x86_64.AppImage
-    ./yonga-0.5.1-x86_64.AppImage self install
+    curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage
+    curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage.sha256
+    sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
+    chmod +x yonga-0.6.0-x86_64.AppImage
+    ./yonga-0.6.0-x86_64.AppImage self install
     ```
 
     `self install` copies the file to `~/.local/bin/yonga`. If that directory is not on your `PATH`

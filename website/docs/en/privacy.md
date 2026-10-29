@@ -111,10 +111,10 @@ Each [GitHub release](https://github.com/ooguz/yonga/releases) carries the AppIm
 `.sha256` file. Check it before you run the AppImage:
 
 ```bash
-sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
+sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
 ```
 
-The release also carries `yonga-0.5.1-x86_64.AppImage.packages.txt`. It lists the bundled Python
+The release also carries `yonga-0.6.0-x86_64.AppImage.packages.txt`. It lists the bundled Python
 interpreter, the yonga wheel with its SHA-256, and the exact version of every Python package in the
 image. The same list is inside the image as `usr/share/yonga/packages.txt`. The build pins the
 interpreter and the AppImage tools by SHA-256; the Python packages are resolved from PyPI when the

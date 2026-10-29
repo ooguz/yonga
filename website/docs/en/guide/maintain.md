@@ -246,8 +246,8 @@ The exit code tells a script whether the host can run models:
 The AppImage can install itself as the `yonga` command. From the downloaded file, run:
 
 ```bash
-chmod +x yonga-0.5.1-x86_64.AppImage
-./yonga-0.5.1-x86_64.AppImage self install
+chmod +x yonga-0.6.0-x86_64.AppImage
+./yonga-0.6.0-x86_64.AppImage self install
 ```
 
 It copies the AppImage to `~/.local/bin/yonga` (choose another directory with `--bin-dir DIR`) and checks that `yonga` on your `PATH` now runs that copy. If it does not, it tells you what to do and exits 2: on Ubuntu and Debian, log out and back in once after the first install, or run `export PATH="$HOME/.local/bin:$PATH"` in the current shell. yonga never edits your shell startup files and never uses `sudo`.

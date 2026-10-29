@@ -88,14 +88,14 @@ recommends another device. See [Tested hardware and models](hardware.md) and
 
 Every [GitHub release](https://github.com/ooguz/yonga/releases) carries
 `yonga-X.Y.Z-x86_64.AppImage` and its `.sha256`. The image holds yonga, its own Python, the
-OpenVINO runtime and the `serve` extra. For 0.5.1:
+OpenVINO runtime and the `serve` extra. For 0.6.0:
 
 ```bash
-curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage
-curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage.sha256
-sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
-chmod +x yonga-0.5.1-x86_64.AppImage
-./yonga-0.5.1-x86_64.AppImage self install
+curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage
+curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage.sha256
+sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
+chmod +x yonga-0.6.0-x86_64.AppImage
+./yonga-0.6.0-x86_64.AppImage self install
 yonga doctor
 ```
 
@@ -122,7 +122,7 @@ another directory you own, add `--bin-dir DIR`.
   directory instead. This works for `self install` too:
 
     ```bash
-    APPIMAGE_EXTRACT_AND_RUN=1 ./yonga-0.5.1-x86_64.AppImage self install
+    APPIMAGE_EXTRACT_AND_RUN=1 ./yonga-0.6.0-x86_64.AppImage self install
     ```
 
 - **Conversion.** The conversion toolchain (optimum-intel, NNCF, Transformers, PyTorch) is not in

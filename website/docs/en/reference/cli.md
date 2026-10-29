@@ -616,7 +616,7 @@ Copy the running AppImage to `~/.local/bin/yonga` so 'yonga' works in any shell.
 | `--json` | | off | Emit the outcome as JSON. |
 
 ```bash
-./yonga-0.5.1-x86_64.AppImage self install
+./yonga-0.6.0-x86_64.AppImage self install
 ```
 
 ### self uninstall

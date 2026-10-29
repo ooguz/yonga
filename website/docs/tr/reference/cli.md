@@ -616,7 +616,7 @@ yonga self install [OPTIONS]
 | `--json` | | kapalı | Sonucu JSON olarak ver. |
 
 ```bash
-./yonga-0.5.1-x86_64.AppImage self install
+./yonga-0.6.0-x86_64.AppImage self install
 ```
 
 ### self uninstall

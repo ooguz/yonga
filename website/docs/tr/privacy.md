@@ -114,10 +114,10 @@ Her [GitHub sürümü](https://github.com/ooguz/yonga/releases) AppImage'ı bir 
 birlikte sunar. AppImage'ı çalıştırmadan önce denetleyin:
 
 ```bash
-sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
+sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
 ```
 
-Sürüm ayrıca `yonga-0.5.1-x86_64.AppImage.packages.txt` dosyasını da içerir. Bu dosya paketlenmiş
+Sürüm ayrıca `yonga-0.6.0-x86_64.AppImage.packages.txt` dosyasını da içerir. Bu dosya paketlenmiş
 Python yorumlayıcısını, SHA-256 değeriyle birlikte yonga wheel'ini ve imajdaki her Python paketinin
 tam sürümünü listeler. Aynı liste imajın içinde `usr/share/yonga/packages.txt` olarak da bulunur.
 İmajı oluşturan betik yorumlayıcıyı ve AppImage araçlarını SHA-256 ile sabitler; Python paketleri

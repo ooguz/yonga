@@ -88,14 +88,14 @@ raporlar ve başka bir aygıt önerir. Bkz. [Test edilen donanım ve modeller](h
 
 Her [GitHub sürümü](https://github.com/ooguz/yonga/releases), `yonga-X.Y.Z-x86_64.AppImage`
 dosyasını ve onun `.sha256` dosyasını içerir. İmajın içinde yonga, kendi Python'u, OpenVINO
-çalışma zamanı ve `serve` ek paketi bulunur. 0.5.1 için:
+çalışma zamanı ve `serve` ek paketi bulunur. 0.6.0 için:
 
 ```bash
-curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage
-curl -LO https://github.com/ooguz/yonga/releases/download/v0.5.1/yonga-0.5.1-x86_64.AppImage.sha256
-sha256sum --check yonga-0.5.1-x86_64.AppImage.sha256
-chmod +x yonga-0.5.1-x86_64.AppImage
-./yonga-0.5.1-x86_64.AppImage self install
+curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage
+curl -LO https://github.com/ooguz/yonga/releases/download/v0.6.0/yonga-0.6.0-x86_64.AppImage.sha256
+sha256sum --check yonga-0.6.0-x86_64.AppImage.sha256
+chmod +x yonga-0.6.0-x86_64.AppImage
+./yonga-0.6.0-x86_64.AppImage self install
 yonga doctor
 ```
 
@@ -123,7 +123,7 @@ başka bir dizine kurmak için `--bin-dir DIR` ekleyin.
   kendini geçici bir dizine açar. Bu `self install` için de geçerlidir:
 
     ```bash
-    APPIMAGE_EXTRACT_AND_RUN=1 ./yonga-0.5.1-x86_64.AppImage self install
+    APPIMAGE_EXTRACT_AND_RUN=1 ./yonga-0.6.0-x86_64.AppImage self install
     ```
 
 - **Dönüştürme.** Dönüştürme araç zinciri (optimum-intel, NNCF, Transformers, PyTorch) imajda
